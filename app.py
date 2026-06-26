@@ -4,100 +4,117 @@ import numpy as np
 
 st.set_page_config(page_title="Генератор фото на УБД", layout="centered")
 
-st.title("📸 Автоматичний генератор фото 3х4 на УБД")
-st.write("Програма автоматично знайде обличчя, обріже фото під суворий стандарт 3х4 та підготує аркуш для друку.")
+st.title("📸 Професійний генератор фото 3х4 на УБД")
+st.write("Програма готує стандартний аркуш **10х15 см** для фотодруку. Всі пропорції захищені від спотворень.")
 
-uploaded_file = st.file_uploader("Виберіть та завантажте фото військового:", type=["jpg", "jpeg", "png"])
+uploaded_file = st.file_uploader("Завантажте фото військового:", type=["jpg", "jpeg", "png"])
 
 if uploaded_file is not None:
-    # Читання зображення
     file_bytes = np.asarray(bytearray(uploaded_file.read()), dtype=np.uint8)
     img = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
     
     if img is None:
-        st.error("Не вдалося завантажити зображення. Спробуйте інший файл.")
+        st.error("Не вдалося прочитати файл. Спробуйте інше зображення.")
     else:
         h_orig, w_orig, _ = img.shape
         
-        # Конвертуємо в сірий колір для розпізнавання обличчя
-        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-        face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
-        faces = face_cascade.detectMultiScale(gray, scaleFactor=1.05, minNeighbors=6, minSize=(80, 80))
+        # Створюємо бічне меню керування
+        st.sidebar.header("⚙️ Налаштування кадру")
+        mode = st.sidebar.radio(
+            "Режим обрізки фото:",
+            ["🤖 Автоматичний (пошук обличчя)", "📐 Ручний (кадрування по центру)"]
+        )
         
-        if len(faces) == 0:
-            st.warning("⚠️ Обличчя не виявлено автоматично. Переконайтеся, що на фото чітко видно обличчя без головного убору.")
-        else:
-            # Беремо найбільше знайдене обличчя
-            x, y, w, h = max(faces, key=lambda f: f[2] * f[3])
+        final_photo = None
+        
+        if mode == "🤖 Автоматичний (пошук обличчя)":
+            gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+            face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
+            faces = face_cascade.detectMultiScale(gray, scaleFactor=1.05, minNeighbors=6, minSize=(60, 60))
             
-            # Розрахунок ідеального розміру кадру під документ (пропорція 3:4)
-            # Щоб обличчя займало ~70-75% висоти, кадр має бути приблизно в 1.8 рази більшим за висоту самого обличчя
-            crop_h = int(h * 1.85)
-            crop_w = int(crop_h * 3 / 4)
+            if len(faces) == 0:
+                st.sidebar.warning("⚠️ Обличчя не знайдено автоматично. Перемкнено в ручний режим.")
+                mode = "📐 Ручний (кадрування по центру)"
+            else:
+                # Беремо найбільше обличчя
+                x, y, w, h = max(faces, key=lambda f: f[2] * f[3])
+                
+                # Інтерактивні слайдери для користувача
+                zoom = st.sidebar.slider("🔍 Масштаб обрізки (зум кадру)", 1.4, 3.0, 2.0, 0.1)
+                shift_y = st.sidebar.slider("↕️ Позиція голови (вище/нижче)", 0.0, 0.5, 0.22, 0.02)
+                
+                crop_h = int(h * zoom)
+                crop_w = int(crop_h * 3 / 4)
+                
+                cx = x + w // 2
+                start_x = cx - crop_w // 2
+                start_y = y - int(crop_h * shift_y)
+                
+                # Захист від виходу за межі оригінального фото
+                if start_x < 0: start_x = 0
+                if start_y < 0: start_y = 0
+                if start_x + crop_w > w_orig: start_x = w_orig - crop_w
+                if start_y + crop_h > h_orig: start_y = h_orig - crop_h
+                
+                if crop_w > w_orig or crop_h > h_orig:
+                    scale = min(w_orig / crop_w, h_orig / crop_h)
+                    crop_w = int(crop_w * scale)
+                    crop_h = int(crop_h * scale)
+                    start_x = max(0, (x + w // 2) - crop_w // 2)
+                    start_y = max(0, y - int(crop_h * shift_y))
+                    start_x = min(start_x, w_orig - crop_w)
+                    start_y = min(start_y, h_orig - crop_h)
+                
+                cropped = img[start_y:start_y+crop_h, start_x:start_x+crop_w]
+                final_photo = cv2.resize(cropped, (600, 800))
+                
+        if mode == "📐 Ручний (кадрування по центру)" or final_photo is None:
+            st.sidebar.info("💡 Фото кадрується чітко по центру під 3:4 без розтягування обличчя.")
+            target_ratio = 3 / 4
+            current_ratio = w_orig / h_orig
             
-            # Центрування по горизонталі та вертикалі (зміщення вгору, щоб захопити плечі)
-            cx = x + w // 2
-            start_x = cx - crop_w // 2
-            start_y = y - int(crop_h * 0.18)  # Робить ідеальний відступ над головою
-            
-            # --- РОЗУМНИЙ ЗАХИСТ ВІД ДЕФОРМАЦІЇ ТА ВИХОДУ ЗА МЕЖІ ---
-            if start_x < 0: start_x = 0
-            if start_y < 0: start_y = 0
-            if start_x + crop_w > w_orig: start_x = w_orig - crop_w
-            if start_y + crop_h > h_orig: start_y = h_orig - crop_h
-            
-            # Якщо оригінальне фото занадто мале для правильних пропорцій, масштабуємо рамку
-            if crop_w > w_orig or crop_h > h_orig:
-                scale = min(w_orig / crop_w, h_orig / crop_h)
-                crop_w = int(crop_w * scale)
-                crop_h = int(crop_h * scale)
-                start_x = max(0, (x + w // 2) - crop_w // 2)
-                start_y = max(0, y - int(crop_h * 0.18))
-                start_x = min(start_x, w_orig - crop_w)
-                start_y = min(start_y, h_orig - crop_h)
-            
-            end_x = start_x + crop_w
-            end_y = start_y + crop_h
-            
-            # Обрізання без жодного спотворення пропорцій
-            cropped = img[start_y:end_y, start_x:end_x]
-            
-            # Фінальне приведення до чіткого цифрового стандарту
+            if current_ratio > target_ratio:
+                new_w = int(h_orig * target_ratio)
+                start_x = (w_orig - new_w) // 2
+                cropped = img[0:h_orig, start_x:start_x+new_w]
+            else:
+                new_h = int(w_orig / target_ratio)
+                start_y = (h_orig - new_h) // 2
+                cropped = img[start_y:start_y+new_h, 0:w_orig]
+                
             final_photo = cv2.resize(cropped, (600, 800))
+
+        # Відображення результатів на екрані (у два стовпчики)
+        col1, col2 = st.columns([1, 2])
+        
+        with col1:
+            st.subheader("📸 Одиночне фото")
+            st.image(cv2.cvtColor(final_photo, cv2.COLOR_BGR2RGB), caption="Розмір 3х4 см", use_container_width=True)
             
-            st.image(cv2.cvtColor(final_photo, cv2.COLOR_BGR2RGB), caption="Правильне фото 3х4 (пропорційне)", width=220)
+        # Створення преміум-аркуша 10х15 см (2000 x 3000 пікселів)
+        canvas = np.ones((3000, 2000, 3), dtype=np.uint8) * 255
+        
+        # Точні математичні координати для симетричного розміщення 6 фото (2х3)
+        positions = [
+            (260, 380), (260, 1020),
+            (1100, 380), (1100, 1020),
+            (1940, 380), (1940, 1020)
+        ]
+        
+        for pos_y, pos_x in positions:
+            canvas[pos_y:pos_y+800, pos_x:pos_x+600] = final_photo
+            # Тонка світло-сіра рамка, яка полегшить розрізання ножицями
+            cv2.rectangle(canvas, (pos_x, pos_y), (pos_x + 600, pos_y + 800), (220, 220, 220), 2)
             
-            # Створення ідеально відцентрованого аркуша (6 штук)
-            st.subheader("🖨️ Готовий аркуш до друку")
+        with col2:
+            st.subheader("🖨️ Аркуш для друку 10х15 см")
+            st.image(cv2.cvtColor(canvas, cv2.COLOR_BGR2RGB), caption="Готовий блок (6 шт.)", use_container_width=True)
             
-            padding = 50
-            canvas_w = 600 * 2 + padding * 3  # Створює симетричні поля
-            canvas_h = 800 * 3 + padding * 4
-            
-            canvas = np.ones((canvas_h, canvas_w, 3), dtype=np.uint8) * 255
-            
-            # Точні координати для розміщення 2х3
-            positions = [
-                (padding, padding), 
-                (padding, 600 + padding * 2),
-                (800 + padding * 2, padding), 
-                (800 + padding * 2, 600 + padding * 2),
-                (1600 + padding * 3, padding), 
-                (1600 + padding * 3, 600 + padding * 2)
-            ]
-            
-            for pos_y, pos_x in positions:
-                canvas[pos_y:pos_y+800, pos_x:pos_x+600] = final_photo
-                # Легкі маркери для зручного розрізання ножицями
-                cv2.rectangle(canvas, (pos_x, pos_y), (pos_x + 600, pos_y + 800), (230, 230, 230), 2)
-            
-            st.image(cv2.cvtColor(canvas, cv2.COLOR_BGR2RGB), caption="Зразок фінального бланка", width=320)
-            
-            # Кнопка збереження
-            _, buffer = cv2.imencode('.jpg', canvas)
-            st.download_button(
-                label="📥 Завантажити ідеальний аркуш для друку",
-                data=buffer.tobytes(),
-                file_name="foto_ubd_correct_3x4.jpg",
-                mime="image/jpeg"
-            )
+        # Кнопка скачування стандартизованого файлу
+        _, buffer = cv2.imencode('.jpg', canvas)
+        st.download_button(
+            label="📥 Завантажити готовий аркуш 10х15 см",
+            data=buffer.tobytes(),
+            file_name="ubd_photo_10x15.jpg",
+            mime="image/jpeg"
+        )
