@@ -1,12 +1,12 @@
 import streamlit as st
 import cv2
 import numpy as np
-from rembg import remove
+from rembg import remove, new_session
 
 st.set_page_config(page_title="Генератор фото на УБД", layout="centered")
 
 st.title("📸 Професійний Студійний Генератор Фото 3х4")
-st.write("Ця версія автоматично видаляє будь-який складний фон за допомогою ШІ та готує аркуш 10х15 см для друку.")
+st.write("Оновлена ШІ-модель чітко розпізнає військову форму та обличчя, готуючи ідеальний аркуш 10х15 см.")
 
 uploaded_file = st.file_uploader("Завантажте оригінальне фото військового:", type=["jpg", "jpeg", "png"])
 
@@ -19,15 +19,13 @@ if uploaded_file is not None:
     else:
         h_orig, w_orig, _ = img.shape
         
-        # --- ЕТАП 1: Професійне видалення фону через ШІ ---
-        with st.spinner('🤖 ШІ видаляє фон та створює студійне світло... (Перший раз може зайняти до 30 сек)'):
-            # rembg видаляє фон, повертаючи RGBA масив
-            rgba_output = remove(img)
+        # --- ЕТАП 1: Видалення фону (Модель спеціально для людей і одягу) ---
+        with st.spinner('🤖 ШІ розпізнає форму та видаляє фон... (Перший раз може зайняти до 30 сек)'):
+            # Використовуємо спеціалізовану модель u2net_human_seg
+            session = new_session("u2net_human_seg")
+            rgba_output = remove(img, session=session, post_process_mask=True)
             
-            # Створюємо чисто біле полотно під розмір оригінального фото
             white_bg = np.ones_like(img) * 255
-            
-            # Накладаємо вирізаний силует на ідеально білий фон
             alpha = rgba_output[:, :, 3] / 255.0
             alpha = np.expand_dims(alpha, axis=2)
             img_no_bg = (rgba_output[:, :, :3] * alpha + white_bg * (1 - alpha)).astype(np.uint8)
@@ -52,7 +50,6 @@ if uploaded_file is not None:
             else:
                 x, y, w, h = max(faces, key=lambda f: f[2] * f[3])
                 
-                # Інтерактивні повзунки для ідеальної підгонки під будь-яке фото
                 zoom = st.sidebar.slider("🔍 Масштаб обрізки (зум кадру)", 1.4, 3.5, 2.1, 0.1)
                 shift_y = st.sidebar.slider("↕️ Позиція голови (вище/нижче)", 0.0, 0.6, 0.25, 0.01)
                 
@@ -63,7 +60,6 @@ if uploaded_file is not None:
                 start_x = cx - crop_w // 2
                 start_y = y - int(crop_h * shift_y)
                 
-                # --- АВТОМАТИЧНЕ ДОТОЧУВАННЯ БІЛОГО ФОНУ (Якщо голова занадто близько до краю) ---
                 pad_top = max(0, -start_y)
                 pad_bottom = max(0, (start_y + crop_h) - h_orig)
                 pad_left = max(0, -start_x)
@@ -102,10 +98,8 @@ if uploaded_file is not None:
             st.subheader("📸 Результат 3х4")
             st.image(cv2.cvtColor(final_photo, cv2.COLOR_BGR2RGB), caption="Ідеальні 3х4 см", use_container_width=True)
             
-        # Створення преміум-аркуша 10х15 см (співвідношення сторін фотолабораторії)
         canvas = np.ones((3000, 2000, 3), dtype=np.uint8) * 255
         
-        # Симетрична сітка 2х3 для 6 фотокарток
         positions = [
             (260, 380), (260, 1020),
             (1100, 380), (1100, 1020),
@@ -114,14 +108,12 @@ if uploaded_file is not None:
         
         for pos_y, pos_x in positions:
             canvas[pos_y:pos_y+800, pos_x:pos_x+600] = final_photo
-            # Світло-сіра лінія-маркер для акуратного розрізання ножицями
             cv2.rectangle(canvas, (pos_x, pos_y), (pos_x + 600, pos_y + 800), (230, 230, 230), 2)
             
         with col2:
             st.subheader("🖨️ Макет 10х15 см (6 шт)")
             st.image(cv2.cvtColor(canvas, cv2.COLOR_BGR2RGB), caption="Готовий блок для друку", use_container_width=True)
             
-        # Кнопка збереження стандартизованого файлу
         _, buffer = cv2.imencode('.jpg', canvas)
         st.download_button(
             label="📥 Завантажити студійний аркуш 10х15 см",
