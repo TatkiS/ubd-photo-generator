@@ -3,10 +3,10 @@ import cv2
 import numpy as np
 from rembg import remove, new_session
 
-st.set_page_config(page_title="Генератор фото на УБД", layout="centered")
+st.set_page_config(page_title="Генератор фото на УБД", layout="wide")
 
 st.title("📸 Професійний Студійний Генератор Фото 3х4")
-st.write("Оновлена ШІ-модель чітко розпізнає військову форму та обличчя, готуючи ідеальний аркуш 10х15 см.")
+st.write("Якщо ШІ погано вирізав форму, просто змініть **Алгоритм фону** в меню ліворуч.")
 
 uploaded_file = st.file_uploader("Завантажте оригінальне фото військового:", type=["jpg", "jpeg", "png"])
 
@@ -19,34 +19,53 @@ if uploaded_file is not None:
     else:
         h_orig, w_orig, _ = img.shape
         
-        # --- ЕТАП 1: Видалення фону (Модель спеціально для людей і одягу) ---
-        with st.spinner('🤖 ШІ розпізнає форму та видаляє фон... (Перший раз може зайняти до 30 сек)'):
-            # Використовуємо спеціалізовану модель u2net_human_seg
-            session = new_session("u2net_human_seg")
-            rgba_output = remove(img, session=session, post_process_mask=True)
-            
-            white_bg = np.ones_like(img) * 255
-            alpha = rgba_output[:, :, 3] / 255.0
-            alpha = np.expand_dims(alpha, axis=2)
-            img_no_bg = (rgba_output[:, :, :3] * alpha + white_bg * (1 - alpha)).astype(np.uint8)
+        st.sidebar.header("🧠 1. Алгоритм фону")
+        model_choice = st.sidebar.radio(
+            "Оберіть нейромережу:",
+            [
+                "🟢 ISNet (Найкращий для одягу/форми)", 
+                "🟡 U2Net (Стандартний)", 
+                "🔴 Human Seg (Тільки обличчя/тіло)",
+                "⚪ Без видалення фону (Оригінал)"
+            ]
+        )
+        
+        model_map = {
+            "🟢 ISNet (Найкращий для одягу/форми)": "isnet-general-use",
+            "🟡 U2Net (Стандартний)": "u2net",
+            "🔴 Human Seg (Тільки обличчя/тіло)": "u2net_human_seg"
+        }
 
-        # --- ЕТАП 2: Налаштування кадру та захист пропорцій ---
-        st.sidebar.header("⚙️ Налаштування кадру")
+        img_no_bg = img.copy()
+
+        if model_choice != "⚪ Без видалення фону (Оригінал)":
+            session_name = model_map[model_choice]
+            with st.spinner(f'🤖 Завантаження {session_name}... (перший запуск може зайняти час)'):
+                session = new_session(session_name)
+                rgba_output = remove(img, session=session, post_process_mask=True)
+                
+                white_bg = np.ones_like(img) * 255
+                alpha = rgba_output[:, :, 3] / 255.0
+                alpha = np.expand_dims(alpha, axis=2)
+                img_no_bg = (rgba_output[:, :, :3] * alpha + white_bg * (1 - alpha)).astype(np.uint8)
+
+        st.sidebar.markdown("---")
+        st.sidebar.header("⚙️ 2. Налаштування кадру")
         mode = st.sidebar.radio(
-            "Режим кадрування обличчя:",
-            ["🤖 Автоматичний (розумний пошук)", "📐 Ручний (чітко по центру)"]
+            "Режим кадрування:",
+            ["🤖 Автоматичний (пошук обличчя)", "📐 Ручний (кадрування по центру)"]
         )
         
         final_photo = None
         
-        if mode == "🤖 Автоматичний (розумний пошук)":
+        if mode == "🤖 Автоматичний (пошук обличчя)":
             gray = cv2.cvtColor(img_no_bg, cv2.COLOR_BGR2GRAY)
             face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
             faces = face_cascade.detectMultiScale(gray, scaleFactor=1.05, minNeighbors=6, minSize=(60, 60))
             
             if len(faces) == 0:
                 st.sidebar.warning("⚠️ Обличчя не знайдено автоматично. Перемкнено в ручний режим.")
-                mode = "📐 Ручний (чітко по центру)"
+                mode = "📐 Ручний (кадрування по центру)"
             else:
                 x, y, w, h = max(faces, key=lambda f: f[2] * f[3])
                 
@@ -76,7 +95,7 @@ if uploaded_file is not None:
                     
                 final_photo = cv2.resize(cropped, (600, 800))
                 
-        if mode == "📐 Ручний (чітко по центру)" or final_photo is None:
+        if mode == "📐 Ручний (кадрування по центру)" or final_photo is None:
             target_ratio = 3 / 4
             current_ratio = w_orig / h_orig
             
@@ -91,7 +110,6 @@ if uploaded_file is not None:
                 
             final_photo = cv2.resize(cropped, (600, 800))
 
-        # --- ЕТАП 3: Виведення результату та генерація бланка 10х15 см ---
         col1, col2 = st.columns([1, 2])
         
         with col1:
@@ -116,8 +134,8 @@ if uploaded_file is not None:
             
         _, buffer = cv2.imencode('.jpg', canvas)
         st.download_button(
-            label="📥 Завантажити студійний аркуш 10х15 см",
+            label="📥 Завантажити макет 10х15 см",
             data=buffer.tobytes(),
-            file_name="ubd_studio_photo_10x15.jpg",
+            file_name="ubd_photo_10x15_ready.jpg",
             mime="image/jpeg"
         )
