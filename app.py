@@ -50,41 +50,24 @@ if uploaded_file is not None:
         st.sidebar.markdown("---")
         st.sidebar.header("⚙️ 2. Ручне редагування кадру")
         
-        mode = st.sidebar.radio(
-            "Початкова точка:",
-            ["🤖 Відштовхуватись від обличчя", "📐 Відштовхуватись від центру фото"]
-        )
-        
-        zoom = st.sidebar.slider("🔍 Масштаб (Ближче / Далі)", 1.0, 5.0, 2.1, 0.1)
-        shift_y = st.sidebar.slider("↕️ Зсув (Вгору / Вниз)", -1.0, 1.0, 0.25, 0.05)
+        # Стовідсотковий ручний режим без глючних автоматичних модулів
+        zoom = st.sidebar.slider("🔍 Масштаб (Ближче / Далі)", 1.0, 5.0, 1.8, 0.1)
+        shift_y = st.sidebar.slider("↕️ Зсув (Вгору / Вниз)", -1.0, 1.0, 0.0, 0.05)
         shift_x = st.sidebar.slider("↔️ Зсув (Вліво / Вправо)", -1.0, 1.0, 0.0, 0.05)
         
-        if mode == "🤖 Відштовхуватись від обличчя":
-            gray = cv2.cvtColor(img_no_bg, cv2.COLOR_BGR2GRAY)
-            face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
-            
-            if face_cascade.empty():
-                base_cx, base_cy = w_orig // 2, h_orig // 2
-                base_h = h_orig // 2
-            else:
-                faces = face_cascade.detectMultiScale(gray, scaleFactor=1.05, minNeighbors=6, minSize=(60, 60))
-                if len(faces) == 0:
-                    base_cx, base_cy = w_orig // 2, h_orig // 2
-                    base_h = h_orig // 2
-                else:
-                    x, y, w, h = max(faces, key=lambda f: f[2] * f[3])
-                    base_cx, base_cy = x + w // 2, y + h // 2
-                    base_h = h
-        else:
-            base_cx, base_cy = w_orig // 2, h_orig // 2
-            base_h = h_orig // 2
+        # Базова точка — чіткий центр зображення
+        base_cx, base_cy = w_orig // 2, h_orig // 2
+        base_h = h_orig // 2
 
+        # Розрахунок рамки кадрування 3:4
         crop_h = int(base_h * zoom)
         crop_w = int(crop_h * 3 / 4)
         
+        # Зміщення відносно дій користувача
         start_x = base_cx - crop_w // 2 + int(crop_w * shift_x)
         start_y = base_cy - crop_h // 2 - int(crop_h * shift_y)
         
+        # Захист країв (автододавання білого фону, якщо вилізли за межі картини)
         pad_top = max(0, -start_y)
         pad_bottom = max(0, (start_y + crop_h) - h_orig)
         pad_left = max(0, -start_x)
@@ -101,6 +84,7 @@ if uploaded_file is not None:
             
         final_photo = cv2.resize(cropped, (600, 800))
 
+        # --- Блок виведення результатів друку ---
         col1, col2 = st.columns([1, 2])
         
         with col1:
